@@ -1,0 +1,102 @@
+import discord
+from discord.ext import commands
+import asyncio
+import os
+
+intents = discord.Intents.default()
+intents.members = True
+intents.messages = True
+intents.message_content = True
+
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+VERIFIED_ROLE = "Cosmic Sparks"
+pending_verifications = {}
+
+if not os.path.exists("verifications"):
+    os.makedirs("verifications")
+
+# Lista a már értesített tagokhoz (offline belépők catch-up)
+unverified_members = set()
+
+@bot.event
+async def on_ready():
+    print(f"Bot online! Logged in as {bot.user}")
+
+    # Ellenőrizzük a szerver tagjait
+    for guild in bot.guilds:
+        role = discord.utils.get(guild.roles, name=VERIFIED_ROLE)
+        for member in guild.members:
+            if role not in member.roles and not member.bot:
+                unverified_members.add(member.id)
+                try:
+                    await member.send(
+                        "Úgy tűnik, lemaradtál a Cosmic Sparks verifikációról, mivel a bot offline volt 😺\n"
+                        "Kérlek tölts fel egy selfie-t a hitelesítéshez!"
+                    )
+                except discord.Forbidden:
+                    print(f"Nem tudtam DM-et küldeni {member.name}-nek.")
+
+@bot.event
+async def on_member_join(member):
+    try:
+        await member.send(
+            f"Üdv a Nebula Paws szerveren, {member.name}! 😺\n"
+            "Mielőtt teljes hozzáférést kapnál, kérlek tölts fel egy selfie-t a hitelesítéshez. "
+            "Mutasd az arcod teljesen, jól látszódjon a szem és a szád. 📸"
+        )
+    except discord.Forbidden:
+        print(f"Nem tudtam DM-et küldeni {member.name}-nek.")
+
+@bot.event
+async def on_message(message):
+    if message.author == bot.user:
+        return
+
+    # !verifyme parancs DM-ben
+    if isinstance(message.channel, discord.DMChannel):
+        if message.content.lower().startswith("!verifyme"):
+            try:
+                await message.author.send(
+                    "Kérlek tölts fel egy selfie-t a verifikációhoz! 📸"
+                )
+            except discord.Forbidden:
+                print(f"Nem tudtam DM-et küldeni {message.author.name}-nek.")
+            return
+
+        if message.attachments:
+            attachment = message.attachments[0]
+            if attachment.filename.lower().endswith(("png", "jpg", "jpeg")):
+                path = f"verifications/{message.author.id}_{attachment.filename}"
+                await attachment.save(path)
+                pending_verifications[message.author.id] = path
+                await message.channel.send(
+                    "Kép megérkezett! ⏳\nA bot automatikusan ellenőrzi, vagy ha kell, moderátor fogja ellenőrizni."
+                )
+
+                await asyncio.sleep(2)
+                success = True
+
+                for guild in bot.guilds:
+                    member = guild.get_member(message.author.id)
+                    if member:
+                        role = discord.utils.get(guild.roles, name=VERIFIED_ROLE)
+                        if not role:
+                            role = await guild.create_role(name=VERIFIED_ROLE)
+                        if success:
+                            await member.add_roles(role)
+                            await message.channel.send(
+                                "✅ Hitelesítés sikeres! A Cosmic Sparks szerepkör hozzáadva."
+                            )
+                        else:
+                            await message.channel.send(
+                                "❌ Nem sikerült az automatikus ellenőrzés. Moderátor fog segíteni."
+                            )
+            else:
+                await message.channel.send("Kérlek, tölts fel egy képet a selfie-verifikációhoz.")
+        else:
+            await message.channel.send("Kérlek, tölts fel egy képet a selfie-verifikációhoz.")
+
+
+# Bot indítása (itt kell a saját tokened)
+bot.run("YOUR BOT TOKEN HERE")
